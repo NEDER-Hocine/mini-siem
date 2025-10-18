@@ -1,7 +1,11 @@
 from fastapi import FastAPI
+from app.routers import logs
 
-app = FastAPI()
+app = FastAPI(title="Mini SIEM API")
+
+# Include routers
+app.include_router(logs.router)
 
 @app.get("/")
-def read_root():
-    return {"message": "Mini-SIEM backend is running 🚀"}
+def root():
+    return {"message": "Mini SIEM API is running 🚀"}
