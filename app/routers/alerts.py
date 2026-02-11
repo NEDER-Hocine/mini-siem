@@ -1,29 +1,25 @@
-from fastapi import APIRouter
-from datetime import datetime
+from typing import List
 
-router = APIRouter(
-    prefix="/alerts",
-    tags=["alerts"]
-)
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
-# Temporary in-memory storage (later we’ll use DB)
-alerts = []
-alert_id_counter = 1
+from app.database import get_db
+from app.models import Alert
+from app.schemas import AlertRead
 
-@router.get("/")
-def get_alerts():
+router = APIRouter(prefix="/alerts", tags=["Alerts"])
+
+
+@router.get("/", response_model=List[AlertRead])
+def get_alerts(db: Session = Depends(get_db)) -> List[AlertRead]:
+    alerts = db.query(Alert).order_by(Alert.created_at.desc()).all()
     return alerts
 
-@router.post("/")
-def create_alert(type: str, message: str, severity: str = "info"):
-    global alert_id_counter
-    alert = {
-        "id": alert_id_counter,
-        "type": type,
-        "message": message,
-        "severity": severity,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    alerts.append(alert)
-    alert_id_counter += 1
+
+@router.get("/{alert_id}", response_model=AlertRead)
+def get_alert(alert_id: int, db: Session = Depends(get_db)) -> AlertRead:
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
     return alert
+

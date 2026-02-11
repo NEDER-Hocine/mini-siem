@@ -28,3 +28,20 @@ It collects and analyzes security events, detects suspicious activity, and gener
 ## 🚀 Run the project
 ```bash
 uvicorn main:app --reload
+```Then open `http://127.0.0.1:8000/docs` to explore the API.
+
+### Auth
+- Write endpoints (like `POST /logs`) expect an API key header:
+  - **Header**: `X-API-Key: super-secret-mini-siem-key`
+
+### Main endpoints
+- **Logs service** (`/logs`):
+  - `GET /logs` – list logs
+  - `GET /logs/{id}` – get single log
+  - `POST /logs` – create log (triggers detection rules)
+- **Alerts service** (`/alerts`):
+  - `GET /alerts` – list alerts
+  - `GET /alerts/{id}` – get single alert
+- **Stats service** (`/stats`):
+  - `GET /stats/summary` – totals, per-severity, per-source counts
+  - `GET /stats/events-per-day` – events grouped by day

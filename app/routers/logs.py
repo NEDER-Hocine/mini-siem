@@ -1,53 +1,69 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
 from datetime import datetime
-from app.routers import alerts
+from typing import List
 
-router = APIRouter(
-    prefix="/logs",
-    tags=["Logs"]
-)
+from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
+from sqlalchemy.orm import Session
 
-# temporary in-memory storage
-logs_db = []
+from app.database import get_db
+from app.models import LogEvent
+from app.schemas import LogCreate, LogRead
+from app.utils import check_api_key, file_logger, run_detection
 
-class Log(BaseModel):
-    source: str
-    message: str
-    severity: str
+router = APIRouter(prefix="/logs", tags=["Logs"])
 
-@router.get("/")
-def get_logs():
-    return {"logs": logs_db}
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-@router.post("/")
-def add_log(log: Log):
-    # auto-generate id
-    log_id = len(logs_db) + 1
-    # auto-generate timestamp
-    timestamp = datetime.utcnow().isoformat()
-    
-    log_entry = {
-        "id": log_id,
-        "source": log.source,
-        "message": log.message,
-        "severity": log.severity,
-        "timestamp": timestamp
-    }
 
-    # save the log
-    logs_db.append(log_entry)
+def require_api_key(api_key: str = Security(api_key_header)) -> None:
+    """
+    Simple API-key based protection for write operations.
+    """
+    if not check_api_key(api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
 
-    # 🚨 Auto-create alert if severity is critical
-    if log.severity.lower() == "critical":
-        alert_entry = {
-            "id": len(alerts.alerts) + 1,
-            "type": "Critical Log Alert",
-            "message": f"[{log.source}] {log.message}",
-            "severity": "critical",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        alerts.alerts.append(alert_entry)
 
-    return {"message": "Log added successfully", "log": log_entry}
+@router.get("/", response_model=List[LogRead])
+def get_logs(db: Session = Depends(get_db)) -> List[LogRead]:
+    """
+    Return all logs ordered by newest first.
+    """
+    logs = db.query(LogEvent).order_by(LogEvent.timestamp.desc()).all()
+    return logs
+
+
+@router.get("/{log_id}", response_model=LogRead)
+def get_log(log_id: int, db: Session = Depends(get_db)) -> LogRead:
+    log = db.query(LogEvent).filter(LogEvent.id == log_id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    return log
+
+
+@router.post("/", response_model=LogRead, dependencies=[Depends(require_api_key)])
+def add_log(payload: LogCreate, db: Session = Depends(get_db)) -> LogRead:
+    """
+    Create a new log entry, persist it, then run detection rules.
+    Also writes a short audit line to a local file using a context manager.
+    """
+    log = LogEvent(
+        source=payload.source,
+        event_type=payload.event_type,
+        message=payload.message,
+        severity=payload.severity,
+        timestamp=datetime.utcnow(),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    # File I/O with context manager (with)
+    with file_logger("logs_audit.txt"):
+        # triggers our decorator-based function with exception handling
+        run_detection(db)
+
+    return log
 
